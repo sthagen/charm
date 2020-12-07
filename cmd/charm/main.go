@@ -7,8 +7,10 @@ import (
 
 	tea "github.com/charmbracelet/bubbletea"
 	"github.com/charmbracelet/charm"
+	"github.com/charmbracelet/charm/keygen"
 	"github.com/charmbracelet/charm/ui"
 	"github.com/charmbracelet/charm/ui/common"
+	keygenTUI "github.com/charmbracelet/charm/ui/keygen"
 	"github.com/mattn/go-isatty"
 	"github.com/muesli/reflow/indent"
 	"github.com/muesli/reflow/wordwrap"
@@ -74,10 +76,41 @@ func getCharmConfig() *charm.Config {
 	return cfg
 }
 
-func initCharmClient() *charm.Client {
+type keygenSetting int
+
+const (
+	noKeygen       keygenSetting = iota // don't generate keys
+	animatedKeygen                      // generate keys; if input is a TTY show progress with a spinner
+	silentKeygen                        // generate keys silently
+)
+
+func initCharmClient(kg keygenSetting) *charm.Client {
 	cfg := getCharmConfig()
 	cc, err := charm.NewClient(cfg)
 	if err == charm.ErrMissingSSHAuth {
+
+		if kg != noKeygen {
+			var keygenError = "Uh oh. We tried to generate a new pair of keys for your " + common.Keyword("Charm Account") + " but we hit a snag:\n\n"
+
+			if isatty.IsTerminal(os.Stdout.Fd()) {
+				// Generate	keys, using Bubble Tea for feedback
+				err := keygenTUI.NewProgram(false).Start()
+				if err != nil {
+					printFormatted(keygenError + err.Error())
+					os.Exit(1)
+				}
+			} else {
+				// Generate keys
+				_, err := keygen.NewSSHKeyPair([]byte(""))
+				if err != nil {
+					printFormatted(keygenError + err.Error())
+					os.Exit(1)
+				}
+			}
+			// Now try again
+			return initCharmClient(noKeygen)
+		}
+
 		printFormatted("We were’t able to authenticate via SSH, which means there’s likely a problem with your key.\n\nYou can generate SSH keys by running " + common.Code("charm keygen") + ". You can also set the environment variable " + common.Code("CHARM_SSH_KEY_PATH") + " to point to a specific private key, or use " + common.Code("-i") + "specifify a location.")
 		os.Exit(1)
 	} else if err != nil {

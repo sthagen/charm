@@ -4,8 +4,11 @@ import (
 	"archive/tar"
 	"fmt"
 	"io"
+	"io/ioutil"
 	"os"
+	"path"
 	"path/filepath"
+	"regexp"
 	"strings"
 
 	"github.com/charmbracelet/charm"
@@ -22,20 +25,79 @@ var (
 		Args:                  cobra.NoArgs,
 		DisableFlagsInUseLine: true,
 		RunE: func(cmd *cobra.Command, args []string) error {
-			fileName := "charm-keys-backup.tar"
+			const filename = "charm-keys-backup.tar"
+
+			cwd, err := os.Getwd()
+			if err != nil {
+				return err
+			}
+
+			// Don't overwrite backup file
+			keyPath := path.Join(cwd, filename)
+			if fileOrDirectoryExists(keyPath) {
+				printFormatted(fmt.Sprintf("Not creating backup file: %s already exists.", common.Code(filename)))
+				os.Exit(1)
+			}
+
 			dd, err := charm.DataPath()
 			if err != nil {
 				return err
 			}
-			err = createTar(dd, fileName)
+
+			if err := validateDirectory(dd); err != nil {
+				return err
+			}
+
+			err = createTar(dd, filename)
 			if err != nil {
 				return err
 			}
-			printFormatted(fmt.Sprintf("Done! Saved keys to %s.", common.Code(fileName)))
+			printFormatted(fmt.Sprintf("Done! Saved keys to %s.", common.Code(filename)))
 			return nil
 		},
 	}
 )
+
+func fileOrDirectoryExists(path string) bool {
+	if _, err := os.Stat(path); os.IsNotExist(err) {
+		return false
+	}
+	return true
+}
+
+func validateDirectory(path string) error {
+	info, err := os.Stat(path)
+	if err == nil {
+		if !info.IsDir() {
+			return fmt.Errorf("%v is not a directory, but it should be", path)
+		}
+
+		files, err := ioutil.ReadDir(path)
+		if err != nil {
+			return err
+		}
+
+		foundKeys := 0
+		keyPattern := regexp.MustCompile(`charm_(rsa|ed25519)(\.pub)?`)
+
+		for _, f := range files {
+			if !f.IsDir() && keyPattern.MatchString(f.Name()) {
+				foundKeys++
+			}
+		}
+		if foundKeys < 2 {
+			return fmt.Errorf("we didn’t find any keys to backup in %s", path)
+		}
+
+		// Everything looks OK!
+		return nil
+
+	} else if os.IsNotExist(err) {
+		return fmt.Errorf("'%v' does not exist", path)
+	} else {
+		return err
+	}
+}
 
 func createTar(source string, target string) error {
 	tarfile, err := os.Create(target)

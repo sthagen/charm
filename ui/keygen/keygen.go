@@ -9,7 +9,6 @@ import (
 	"github.com/charmbracelet/charm/keygen"
 	"github.com/charmbracelet/charm/ui/common"
 	"github.com/muesli/reflow/indent"
-	"github.com/muesli/reflow/wordwrap"
 	"github.com/muesli/termenv"
 )
 
@@ -26,6 +25,16 @@ const (
 	StatusQuitting
 )
 
+func NewProgram(fancy bool) *tea.Program {
+	m := NewModel()
+	m.standalone = true
+	m.fancy = fancy
+	m.spinner = spinner.NewModel()
+	m.spinner.Spinner = common.Spinner
+	m.spinner.ForegroundColor = common.SpinnerColor.String()
+	return tea.NewProgram(m)
+}
+
 type failedMsg struct{ err error }
 
 func (f failedMsg) Error() string { return f.err.Error() }
@@ -40,6 +49,7 @@ type Model struct {
 	Status        status
 	err           error
 	standalone    bool
+	fancy         bool
 	spinner       spinner.Model
 	terminalWidth int
 }
@@ -53,11 +63,7 @@ func NewModel() Model {
 
 // Init is the Bubble Tea initialization function for the keygen.
 func (m Model) Init() tea.Cmd {
-	m.standalone = true
-	m.spinner = spinner.NewModel()
-	m.spinner.Frames = common.SpinnerFrames
-	m.spinner.ForegroundColor = common.SpinnerColor.String()
-	return tea.Batch(GenerateKeys, spinner.Tick(m.spinner))
+	return tea.Batch(GenerateKeys, spinner.Tick)
 }
 
 // Update is the Bubble Tea update loop for the keygen.
@@ -87,7 +93,7 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		return m, nil
 	case spinner.TickMsg:
 		if m.Status == StatusRunning {
-			newSpinnerModel, cmd := spinner.Update(msg, m.spinner)
+			newSpinnerModel, cmd := m.spinner.Update(msg)
 			m.spinner = newSpinnerModel
 			return m, cmd
 		}
@@ -103,7 +109,7 @@ func (m Model) View() string {
 	switch m.Status {
 	case StatusRunning:
 		if m.standalone {
-			s += spinner.View(m.spinner)
+			s += m.spinner.View()
 		}
 		s += " Generating keys..."
 	case StatusSuccess:
@@ -120,11 +126,8 @@ func (m Model) View() string {
 		s += "Exiting..."
 	}
 
-	if m.standalone {
-		return wordwrap.String(
-			indent.String(fmt.Sprintf("\n%s\n\n", s), indentAmount),
-			m.terminalWidth-(indentAmount*2),
-		)
+	if m.standalone && m.fancy {
+		return indent.String(fmt.Sprintf("\n%s\n\n", s), indentAmount)
 	}
 
 	return s

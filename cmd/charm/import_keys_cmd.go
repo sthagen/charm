@@ -2,7 +2,6 @@ package main
 
 import (
 	"archive/tar"
-	"errors"
 	"fmt"
 	"io"
 	"os"
@@ -25,12 +24,12 @@ var (
 		Args:                  cobra.ExactArgs(1),
 		DisableFlagsInUseLine: false,
 		RunE: func(cmd *cobra.Command, args []string) error {
-			if !isTTY() && !forceImportOverwrite {
-				return errors.New("not a TTY; for non-interactive mode use -f")
-			}
-
 			dd, err := charm.DataPath()
 			if err != nil {
+				return err
+			}
+
+			if err := os.MkdirAll(dd, 0700); err != nil {
 				return err
 			}
 
@@ -40,10 +39,13 @@ var (
 			}
 
 			if !empty && !forceImportOverwrite {
-				return newImportConfirmationTUI(args[0], dd).Start()
+				if isTTY() {
+					return newImportConfirmationTUI(args[0], dd).Start()
+				}
+				return fmt.Errorf("not overwriting the existing keys in %s; to force, use -f", dd)
 			}
 
-			err = untar(args[0], filepath.Dir(dd))
+			err = untar(args[0], dd)
 			if err != nil {
 				return err
 			}
@@ -67,7 +69,7 @@ func isEmpty(name string) (bool, error) {
 	return false, err
 }
 
-func untar(tarball, target string) error {
+func untar(tarball, targetDir string) error {
 	reader, err := os.Open(tarball)
 	if err != nil {
 		return err
@@ -83,7 +85,17 @@ func untar(tarball, target string) error {
 			return err
 		}
 
-		path := filepath.Join(target, header.Name)
+		// Files are stored in a 'charm' subdirectory in the tar. Strip off the
+		// directory info so we can just place the files at the top level of
+		// the given target directory.
+		filename := filepath.Base(header.Name)
+
+		// Don't create an empty "charm" directory
+		if filename == "charm" {
+			continue
+		}
+
+		path := filepath.Join(targetDir, filename)
 		info := header.FileInfo()
 		if info.IsDir() {
 			if err = os.MkdirAll(path, info.Mode()); err != nil {
